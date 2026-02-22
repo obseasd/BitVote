@@ -12,7 +12,7 @@ import {
 import { encodeFunctionData } from "viem";
 import { useToast } from "@/components/Toast";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 type TxStep = "idle" | "adding" | "finalizing" | "signing" | "broadcasting" | "waiting" | "done" | "error";
 
@@ -37,6 +37,7 @@ export default function CreatePollPage() {
         setTimeout(() => router.push("/"), 2000);
       },
       onError: (err) => {
+        console.error("[BitVote] waitForTransaction error:", err);
         setError(err.message);
         setStep("error");
         toast("Transaction failed", "error");
@@ -71,6 +72,7 @@ export default function CreatePollPage() {
       setStep("adding");
       const filteredOptions = options.filter((o) => o.trim().length > 0);
 
+      console.log("[BitVote] Adding tx intention...");
       addTxIntention({
         reset: true,
         intention: {
@@ -87,37 +89,61 @@ export default function CreatePollPage() {
 
       // Step 2: Finalize BTC transaction
       setStep("finalizing");
-      // Small delay to let state propagate
       await new Promise((r) => setTimeout(r, 500));
+      console.log("[BitVote] Finalizing BTC transaction...");
       finalizeBTCTransaction();
     } catch (err: unknown) {
+      console.error("[BitVote] handleCreate error:", err);
       setError(err instanceof Error ? err.message : "Failed to create transaction");
       setStep("error");
     }
   };
 
+  // Auto-trigger sign when btcData becomes available
+  useEffect(() => {
+    if (btcData && step === "finalizing") {
+      console.log("[BitVote] btcData ready, auto-signing...", btcData.tx.id);
+      handleSign();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [btcData]);
+
   const handleSign = async () => {
     if (!btcData) return;
     try {
+      // Step 3: Sign
       setStep("signing");
+      console.log("[BitVote] Signing intentions...", txIntentions.length, "intention(s)");
       for (const intention of txIntentions) {
         await signIntentionAsync({ intention, txId: btcData.tx.id });
       }
+      console.log("[BitVote] All intentions signed");
+      console.log("[BitVote] Signed EVM txs:", txIntentions.map(
+        (it) => (it.signedEvmTransaction as string)?.substring(0, 20) + "..."
+      ));
 
       // Step 4: Broadcast
       setStep("broadcasting");
+      console.log("[BitVote] Broadcasting...");
+      console.log("[BitVote] BTC tx hex length:", btcData.tx.hex.length);
       await sendBTCTransactions({
         serializedTransactions: txIntentions.map(
           (it) => it.signedEvmTransaction as `0x${string}`
         ),
         btcTransaction: btcData.tx.hex,
       });
+      console.log("[BitVote] Broadcast complete!");
 
+      // Step 5: Wait
       setStep("waiting");
+      console.log("[BitVote] Waiting for confirmation, txId:", btcData.tx.id);
       waitForTransaction({ txId: btcData.tx.id });
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Transaction failed");
+      console.error("[BitVote] handleSign error:", err);
+      const msg = err instanceof Error ? err.message : "Transaction failed";
+      setError(msg);
       setStep("error");
+      toast(msg, "error");
     }
   };
 
@@ -228,14 +254,6 @@ export default function CreatePollPage() {
                 className="flex-1 bg-accent hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed text-black font-semibold py-3 rounded-lg transition-colors"
               >
                 Create Poll
-              </button>
-            )}
-            {btcData && (step === "finalizing" || step === "adding") && (
-              <button
-                onClick={handleSign}
-                className="flex-1 bg-accent hover:bg-accent-hover text-black font-semibold py-3 rounded-lg transition-colors"
-              >
-                Sign & Broadcast
               </button>
             )}
           </div>
