@@ -28,7 +28,7 @@ export default function CreatePollPage() {
   const { addTxIntention, txIntentions } = useAddTxIntention();
   const { finalizeBTCTransaction, data: btcData } = useFinalizeBTCTransaction();
   const { signIntentionAsync } = useSignIntention();
-  const { sendBTCTransactions } = useSendBTCTransactions();
+  const { sendBTCTransactionsAsync } = useSendBTCTransactions();
   const { waitForTransaction } = useWaitForTransaction({
     mutation: {
       onSuccess: () => {
@@ -126,13 +126,14 @@ export default function CreatePollPage() {
       setStep("broadcasting");
       console.log("[BitVote] Broadcasting...");
       console.log("[BitVote] BTC tx hex length:", btcData.tx.hex.length);
-      await sendBTCTransactions({
+      console.log("[BitVote] Signed EVM tx prefix:", (txIntentions[0]?.signedEvmTransaction as string)?.substring(0, 6));
+      const hashes = await sendBTCTransactionsAsync({
         serializedTransactions: txIntentions.map(
           (it) => it.signedEvmTransaction as `0x${string}`
         ),
         btcTransaction: btcData.tx.hex,
       });
-      console.log("[BitVote] Broadcast complete!");
+      console.log("[BitVote] Broadcast complete! EVM hashes:", hashes);
 
       // Step 5: Wait
       setStep("waiting");

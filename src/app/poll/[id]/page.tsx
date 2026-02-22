@@ -49,7 +49,7 @@ export default function PollPage() {
   const { addTxIntention, txIntentions } = useAddTxIntention();
   const { finalizeBTCTransaction, data: btcData } = useFinalizeBTCTransaction();
   const { signIntentionAsync } = useSignIntention();
-  const { sendBTCTransactions } = useSendBTCTransactions();
+  const { sendBTCTransactionsAsync } = useSendBTCTransactions();
   const { waitForTransaction } = useWaitForTransaction({
     mutation: {
       onSuccess: () => {
@@ -116,7 +116,7 @@ export default function PollPage() {
       }
 
       setStep("broadcasting");
-      await sendBTCTransactions({
+      await sendBTCTransactionsAsync({
         serializedTransactions: txIntentions.map(
           (it) => it.signedEvmTransaction as `0x${string}`
         ),
