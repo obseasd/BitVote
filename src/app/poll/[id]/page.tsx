@@ -111,15 +111,15 @@ export default function PollPage() {
     if (!btcData) return;
     try {
       setStep("signing");
+      const signedTxs: `0x${string}`[] = [];
       for (const intention of txIntentions) {
-        await signIntentionAsync({ intention, txId: btcData.tx.id });
+        const signed = await signIntentionAsync({ intention, txId: btcData.tx.id });
+        signedTxs.push(signed);
       }
 
       setStep("broadcasting");
       await sendBTCTransactionsAsync({
-        serializedTransactions: txIntentions.map(
-          (it) => it.signedEvmTransaction as `0x${string}`
-        ),
+        serializedTransactions: signedTxs,
         btcTransaction: btcData.tx.hex,
       });
 

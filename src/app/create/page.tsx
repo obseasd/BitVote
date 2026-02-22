@@ -111,26 +111,26 @@ export default function CreatePollPage() {
   const handleSign = async () => {
     if (!btcData) return;
     try {
-      // Step 3: Sign
+      // Step 3: Sign — capture return values directly (React state updates async)
       setStep("signing");
       console.log("[BitVote] Signing intentions...", txIntentions.length, "intention(s)");
+      const signedTxs: `0x${string}`[] = [];
       for (const intention of txIntentions) {
-        await signIntentionAsync({ intention, txId: btcData.tx.id });
+        const signed = await signIntentionAsync({ intention, txId: btcData.tx.id });
+        signedTxs.push(signed);
       }
       console.log("[BitVote] All intentions signed");
-      console.log("[BitVote] Signed EVM txs:", txIntentions.map(
-        (it) => (it.signedEvmTransaction as string)?.substring(0, 20) + "..."
+      console.log("[BitVote] Signed EVM txs:", signedTxs.map(
+        (tx) => tx?.substring(0, 20) + "..."
       ));
 
       // Step 4: Broadcast
       setStep("broadcasting");
       console.log("[BitVote] Broadcasting...");
       console.log("[BitVote] BTC tx hex length:", btcData.tx.hex.length);
-      console.log("[BitVote] Signed EVM tx prefix:", (txIntentions[0]?.signedEvmTransaction as string)?.substring(0, 6));
+      console.log("[BitVote] Signed EVM tx prefix:", signedTxs[0]?.substring(0, 6));
       const hashes = await sendBTCTransactionsAsync({
-        serializedTransactions: txIntentions.map(
-          (it) => it.signedEvmTransaction as `0x${string}`
-        ),
+        serializedTransactions: signedTxs,
         btcTransaction: btcData.tx.hex,
       });
       console.log("[BitVote] Broadcast complete! EVM hashes:", hashes);
