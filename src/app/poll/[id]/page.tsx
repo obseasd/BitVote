@@ -119,9 +119,11 @@ export default function PollPage() {
       const signedTxs: `0x${string}`[] = [];
 
       for (const intention of txIntentions) {
-        // 1. Serialize intention
+        // Use ordinals (P2TR) account — same as the working script
+        const fromAddr = ordinalsAccount?.address;
+        console.log("[BitVote] Vote: serializeIntention with from:", fromAddr);
         const { serialized, intention: prepared } = await serializeIntention(
-          midlConfig, publicClient, intention, txIntentions, { txId: btcData.tx.id }
+          midlConfig, publicClient, intention, txIntentions, { txId: btcData.tx.id, from: fromAddr }
         );
         console.log("[BitVote] Serialized prefix:", serialized.substring(0, 10), "len:", serialized.length);
         if (!prepared.evmTransaction) throw new Error("No EVM transaction");
@@ -130,8 +132,8 @@ export default function PollPage() {
         const message = keccak256(serialized);
         console.log("[BitVote] Message hash:", message);
 
-        // 3. Get account
-        const account = getDefaultAccount(midlConfig);
+        // 3. Get ordinals account (P2TR)
+        const account = getDefaultAccount(midlConfig, fromAddr ? (it: { address: string }) => it.address === fromAddr : undefined);
         console.log("[BitVote] Account:", account.address, "type:", account.addressType);
 
         // 4. Sign via wallet

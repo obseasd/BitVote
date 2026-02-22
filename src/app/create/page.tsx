@@ -22,7 +22,10 @@ type TxStep = "idle" | "adding" | "finalizing" | "signing" | "broadcasting" | "w
 export default function CreatePollPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const { isConnected } = useAccounts();
+  const accountsResult = useAccounts();
+  const isConnected = accountsResult.isConnected;
+  const accounts = accountsResult.accounts;
+  const ordinalsAccount = accounts?.find((a) => a.purpose === "ordinals");
   const [question, setQuestion] = useState("");
   const [options, setOptions] = useState(["", ""]);
   const [step, setStep] = useState<TxStep>("idle");
@@ -121,36 +124,33 @@ export default function CreatePollPage() {
       const signedTxs: `0x${string}`[] = [];
 
       for (const intention of txIntentions) {
-        // 1. Serialize intention (adds BTC fields, nonce, gasPrice)
-        console.log("[BitVote] Step 1: serializeIntention...");
+        // Use ordinals (P2TR) account — same as the working script
+        const fromAddr = ordinalsAccount?.address;
+        console.log("[BitVote] Step 1: serializeIntention with from:", fromAddr);
         const { serialized, intention: prepared } = await serializeIntention(
-          midlConfig, publicClient, intention, txIntentions, { txId: btcData.tx.id }
+          midlConfig, publicClient, intention, txIntentions, { txId: btcData.tx.id, from: fromAddr }
         );
         console.log("[BitVote] Serialized prefix:", serialized.substring(0, 10), "len:", serialized.length);
         if (!prepared.evmTransaction) throw new Error("No EVM transaction");
-        console.log("[BitVote] Prepared evmTx keys:", Object.keys(prepared.evmTransaction).join(", "));
 
         // 2. Hash the serialized transaction
         const message = keccak256(serialized);
-        console.log("[BitVote] Step 2: message hash:", message);
+        console.log("[BitVote] Message hash:", message);
 
-        // 3. Get the signing account
-        const account = getDefaultAccount(midlConfig);
-        console.log("[BitVote] Step 3: account addr:", account.address);
-        console.log("[BitVote] Account type:", account.addressType, "pubkey:", account.publicKey?.substring(0, 20));
+        // 3. Get the ordinals account (P2TR) — must match what serializeIntention used
+        const account = getDefaultAccount(midlConfig, fromAddr ? (it: { address: string }) => it.address === fromAddr : undefined);
+        console.log("[BitVote] Account:", account.address, "type:", account.addressType);
 
         // 4. Sign the message hash via wallet (BIP-322)
-        console.log("[BitVote] Step 4: signing via wallet...");
+        console.log("[BitVote] Signing via wallet...");
         const sigData = await midlSignMessage(midlConfig, {
           message,
           address: account.address,
           protocol: SignMessageProtocol.Bip322,
         });
-        console.log("[BitVote] Signature received. Protocol:", sigData.protocol, "sig length:", sigData.signature.length);
-        console.log("[BitVote] Sig preview:", sigData.signature.substring(0, 40));
+        console.log("[BitVote] Sig protocol:", sigData.protocol, "len:", sigData.signature.length);
 
         // 5. Extract r, s, v from BIP-322 signature
-        console.log("[BitVote] Step 5: extractEVMSignature...");
         const { r, s, v } = await extractEVMSignature(
           message, sigData.signature, sigData.protocol,
           { addressType: account.addressType, publicKey: account.publicKey }
