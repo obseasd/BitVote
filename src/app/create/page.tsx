@@ -126,19 +126,14 @@ export default function CreatePollPage() {
         (tx) => tx?.substring(0, 20) + "..."
       ));
 
-      // Step 4: Broadcast BTC first, then EVM
+      // Step 4: Send EVM txs to RPC first, THEN broadcast BTC
+      // The Midl node must know about EVM txs before BTC is confirmed
       setStep("broadcasting");
       console.log("[BitVote] Broadcasting...");
       console.log("[BitVote] BTC tx hex length:", btcData.tx.hex.length);
       console.log("[BitVote] Signed EVM tx prefix:", signedTxs[0]?.substring(0, 6));
 
-      // Broadcast BTC transaction to Bitcoin network first
-      console.log("[BitVote] Broadcasting BTC tx to Bitcoin network...");
-      const provider = new RegtestBridgeProvider();
-      const btcTxId = await provider.broadcastTransaction(null, btcData.tx.hex);
-      console.log("[BitVote] BTC broadcast complete! TxId:", btcTxId);
-
-      // Send EVM txs via direct RPC call (bypass viem client)
+      // Send EVM txs via direct RPC call
       console.log("[BitVote] Sending EVM txs to RPC...");
       const rpcResponse = await fetch("https://rpc.staging.midl.xyz", {
         method: "POST",
@@ -157,6 +152,12 @@ export default function CreatePollPage() {
       }
       const hashes = rpcResult.result;
       console.log("[BitVote] EVM hashes:", hashes);
+
+      // Now broadcast BTC transaction to Bitcoin network
+      console.log("[BitVote] Broadcasting BTC tx to Bitcoin network...");
+      const provider = new RegtestBridgeProvider();
+      const btcTxId = await provider.broadcastTransaction(null, btcData.tx.hex);
+      console.log("[BitVote] BTC broadcast complete! TxId:", btcTxId);
 
       // Step 5: Wait
       setStep("waiting");
