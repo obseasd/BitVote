@@ -32,10 +32,15 @@ export function Header() {
         return;
       }
 
-      await connectAsync({ id: connector.id });
+      console.log("[BitVote] Connector:", connector.id);
+      console.log("[BitVote] All connectors:", connectors.map(c => c.id));
+      const result = await connectAsync({ id: connector.id });
+      console.log("[BitVote] Connected accounts:", result);
       toast("Wallet connected!", "success");
     } catch (err: unknown) {
-      console.error("Connect error:", err);
+      console.error("[BitVote] Connect error:", err);
+      console.error("[BitVote] Error name:", (err as Error)?.name);
+      console.error("[BitVote] Error stack:", (err as Error)?.stack);
       const msg = err instanceof Error ? err.message : "Connection failed";
       toast(msg, "error");
     } finally {

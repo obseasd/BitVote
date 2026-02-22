@@ -14,5 +14,5 @@ export const midlConfig = createConfig({
   networks: [regtestAsTestnet],
   connectors: [xverseConnector()],
   provider: new RegtestBridgeProvider(),
-  persist: true,
+  persist: false,
 });
