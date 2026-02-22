@@ -2,14 +2,16 @@
 
 import { Header } from "@/components/Header";
 import { BITVOTE_ABI, BITVOTE_ADDRESS } from "@/config/contract";
-import { useAccounts, useWaitForTransaction } from "@midl/react";
+import { useAccounts, useWaitForTransaction, useConfigInternal } from "@midl/react";
 import {
   useAddTxIntention,
   useFinalizeBTCTransaction,
-  useSignIntention,
   useSendBTCTransactions,
 } from "@midl/executor-react";
-import { encodeFunctionData } from "viem";
+import { serializeIntention, extractEVMSignature } from "@midl/executor";
+import { getDefaultAccount, signMessage as midlSignMessage, SignMessageProtocol } from "@midl/core";
+import { encodeFunctionData, serializeTransaction, keccak256 } from "viem";
+import { usePublicClient } from "wagmi";
 import { RegtestBridgeProvider } from "@/config/regtestBridgeProvider";
 import { useToast } from "@/components/Toast";
 import { useRouter } from "next/navigation";
@@ -26,10 +28,10 @@ export default function CreatePollPage() {
   const [step, setStep] = useState<TxStep>("idle");
   const [error, setError] = useState("");
 
+  const midlConfig = useConfigInternal();
+  const publicClient = usePublicClient();
   const { addTxIntention, txIntentions } = useAddTxIntention();
   const { finalizeBTCTransaction, data: btcData } = useFinalizeBTCTransaction();
-  const { signIntentionAsync } = useSignIntention();
-  // Using direct fetch to RPC instead of hook for debugging
   useSendBTCTransactions(); // keep hook mounted
   const { waitForTransaction } = useWaitForTransaction({
     mutation: {
@@ -79,8 +81,6 @@ export default function CreatePollPage() {
         reset: true,
         intention: {
           evmTransaction: {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            type: "legacy" as any,
             to: BITVOTE_ADDRESS as `0x${string}`,
             data: encodeFunctionData({
               abi: BITVOTE_ABI,
@@ -114,29 +114,60 @@ export default function CreatePollPage() {
   }, [btcData]);
 
   const handleSign = async () => {
-    if (!btcData) return;
+    if (!btcData || !publicClient) return;
     try {
-      // Step 3: Sign — capture return values directly (React state updates async)
       setStep("signing");
-      console.log("[BitVote] Signing intentions...", txIntentions.length, "intention(s)");
+      console.log("[BitVote] Manual signing flow. Intentions:", txIntentions.length);
       const signedTxs: `0x${string}`[] = [];
+
       for (const intention of txIntentions) {
-        const signed = await signIntentionAsync({ intention, txId: btcData.tx.id });
-        signedTxs.push(signed);
+        // 1. Serialize intention (adds BTC fields, nonce, gasPrice)
+        console.log("[BitVote] Step 1: serializeIntention...");
+        const { serialized, intention: prepared } = await serializeIntention(
+          midlConfig, publicClient, intention, txIntentions, { txId: btcData.tx.id }
+        );
+        console.log("[BitVote] Serialized prefix:", serialized.substring(0, 10), "len:", serialized.length);
+        if (!prepared.evmTransaction) throw new Error("No EVM transaction");
+        console.log("[BitVote] Prepared evmTx keys:", Object.keys(prepared.evmTransaction).join(", "));
+
+        // 2. Hash the serialized transaction
+        const message = keccak256(serialized);
+        console.log("[BitVote] Step 2: message hash:", message);
+
+        // 3. Get the signing account
+        const account = getDefaultAccount(midlConfig);
+        console.log("[BitVote] Step 3: account addr:", account.address);
+        console.log("[BitVote] Account type:", account.addressType, "pubkey:", account.publicKey?.substring(0, 20));
+
+        // 4. Sign the message hash via wallet (BIP-322)
+        console.log("[BitVote] Step 4: signing via wallet...");
+        const sigData = await midlSignMessage(midlConfig, {
+          message,
+          address: account.address,
+          protocol: SignMessageProtocol.Bip322,
+        });
+        console.log("[BitVote] Signature received. Protocol:", sigData.protocol, "sig length:", sigData.signature.length);
+        console.log("[BitVote] Sig preview:", sigData.signature.substring(0, 40));
+
+        // 5. Extract r, s, v from BIP-322 signature
+        console.log("[BitVote] Step 5: extractEVMSignature...");
+        const { r, s, v } = await extractEVMSignature(
+          message, sigData.signature, sigData.protocol,
+          { addressType: account.addressType, publicKey: account.publicKey }
+        );
+        console.log("[BitVote] r:", r.substring(0, 20), "s:", s.substring(0, 20), "v:", v.toString());
+
+        // 6. Create final signed transaction (Type-7 with BTC fields + signature)
+        console.log("[BitVote] Step 6: final serializeTransaction...");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const signedTx = serializeTransaction(prepared.evmTransaction as any, { r, s, v });
+        console.log("[BitVote] Signed tx prefix:", signedTx.substring(0, 10), "len:", signedTx.length);
+        signedTxs.push(signedTx);
       }
-      console.log("[BitVote] All intentions signed");
-      console.log("[BitVote] FULL_SIGNED_TX:", signedTxs[0]);
-      console.log("[BitVote] FULL_BTC_HEX:", btcData.tx.hex);
 
-      // Step 4: Send EVM txs to RPC first, THEN broadcast BTC
-      // The Midl node must know about EVM txs before BTC is confirmed
+      // 7. Send to RPC
       setStep("broadcasting");
-      console.log("[BitVote] Broadcasting...");
-      console.log("[BitVote] BTC tx hex length:", btcData.tx.hex.length);
-      console.log("[BitVote] Signed EVM tx prefix:", signedTxs[0]?.substring(0, 6));
-
-      // Send EVM txs via direct RPC call
-      console.log("[BitVote] Sending EVM txs to RPC...");
+      console.log("[BitVote] Step 7: sending to RPC...");
       const rpcResponse = await fetch("https://rpc.staging.midl.xyz", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -152,18 +183,16 @@ export default function CreatePollPage() {
       if (rpcResult.error) {
         throw new Error(`RPC error: ${rpcResult.error.message}`);
       }
-      const hashes = rpcResult.result;
-      console.log("[BitVote] EVM hashes:", hashes);
+      console.log("[BitVote] EVM hashes:", rpcResult.result);
 
-      // Now broadcast BTC transaction to Bitcoin network
-      console.log("[BitVote] Broadcasting BTC tx to Bitcoin network...");
+      // 8. Broadcast BTC
+      console.log("[BitVote] Step 8: broadcasting BTC...");
       const provider = new RegtestBridgeProvider();
       const btcTxId = await provider.broadcastTransaction(null, btcData.tx.hex);
-      console.log("[BitVote] BTC broadcast complete! TxId:", btcTxId);
+      console.log("[BitVote] BTC broadcast done! TxId:", btcTxId);
 
-      // Step 5: Wait
+      // 9. Wait for confirmation
       setStep("waiting");
-      console.log("[BitVote] Waiting for confirmation, txId:", btcData.tx.id);
       waitForTransaction({ txId: btcData.tx.id });
     } catch (err: unknown) {
       console.error("[BitVote] handleSign error:", err);
