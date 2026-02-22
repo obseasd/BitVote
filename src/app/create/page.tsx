@@ -146,7 +146,7 @@ export default function CreatePollPage() {
         body: JSON.stringify({
           jsonrpc: "2.0",
           method: "eth_sendBTCTransactions",
-          params: [signedTxs, `0x${btcData.tx.hex}`],
+          params: [signedTxs, btcData.tx.hex],
           id: 1,
         }),
       });
