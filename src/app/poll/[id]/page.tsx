@@ -50,7 +50,7 @@ export default function PollPage() {
   const { addTxIntention, txIntentions } = useAddTxIntention();
   const { finalizeBTCTransaction, data: btcData } = useFinalizeBTCTransaction();
   const { signIntentionAsync } = useSignIntention();
-  const { sendBTCTransactionsAsync } = useSendBTCTransactions();
+  useSendBTCTransactions(); // keep hook mounted
   const { waitForTransaction } = useWaitForTransaction({
     mutation: {
       onSuccess: () => {
@@ -95,6 +95,7 @@ export default function PollPage() {
               functionName: "vote",
               args: [BigInt(pollId), BigInt(selectedOption)],
             }),
+            gas: BigInt(500_000),
           },
         },
       });
@@ -119,12 +120,22 @@ export default function PollPage() {
       }
 
       setStep("broadcasting");
-      await sendBTCTransactionsAsync({
-        serializedTransactions: signedTxs,
-        btcTransaction: btcData.tx.hex,
-      });
 
-      // Broadcast BTC transaction to Bitcoin network
+      // Send EVM txs to RPC first
+      const rpcResponse = await fetch("https://rpc.staging.midl.xyz", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "eth_sendBTCTransactions",
+          params: [signedTxs, btcData.tx.hex],
+          id: 1,
+        }),
+      });
+      const rpcResult = await rpcResponse.json();
+      if (rpcResult.error) throw new Error(`RPC error: ${rpcResult.error.message}`);
+
+      // Then broadcast BTC to Bitcoin network
       const provider = new RegtestBridgeProvider();
       await provider.broadcastTransaction(null, btcData.tx.hex);
 

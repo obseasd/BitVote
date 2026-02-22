@@ -85,6 +85,7 @@ export default function CreatePollPage() {
               functionName: "createPoll",
               args: [question.trim(), filteredOptions.map((o) => o.trim())],
             }),
+            gas: BigInt(500_000),
           },
         },
       });
