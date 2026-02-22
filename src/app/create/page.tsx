@@ -123,9 +123,8 @@ export default function CreatePollPage() {
         signedTxs.push(signed);
       }
       console.log("[BitVote] All intentions signed");
-      console.log("[BitVote] Signed EVM txs:", signedTxs.map(
-        (tx) => tx?.substring(0, 20) + "..."
-      ));
+      console.log("[BitVote] FULL_SIGNED_TX:", signedTxs[0]);
+      console.log("[BitVote] FULL_BTC_HEX:", btcData.tx.hex);
 
       // Step 4: Send EVM txs to RPC first, THEN broadcast BTC
       // The Midl node must know about EVM txs before BTC is confirmed
