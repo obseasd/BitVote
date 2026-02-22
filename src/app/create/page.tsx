@@ -79,6 +79,8 @@ export default function CreatePollPage() {
         reset: true,
         intention: {
           evmTransaction: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            type: "legacy" as any,
             to: BITVOTE_ADDRESS as `0x${string}`,
             data: encodeFunctionData({
               abi: BITVOTE_ABI,
