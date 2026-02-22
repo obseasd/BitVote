@@ -10,6 +10,7 @@ import {
   useSendBTCTransactions,
 } from "@midl/executor-react";
 import { encodeFunctionData } from "viem";
+import { RegtestBridgeProvider } from "@/config/regtestBridgeProvider";
 import { useToast } from "@/components/Toast";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
@@ -133,7 +134,13 @@ export default function CreatePollPage() {
         serializedTransactions: signedTxs,
         btcTransaction: btcData.tx.hex,
       });
-      console.log("[BitVote] Broadcast complete! EVM hashes:", hashes);
+      console.log("[BitVote] EVM broadcast complete! Hashes:", hashes);
+
+      // Broadcast BTC transaction to Bitcoin network
+      console.log("[BitVote] Broadcasting BTC tx to Bitcoin network...");
+      const provider = new RegtestBridgeProvider();
+      const btcTxId = await provider.broadcastTransaction(null, btcData.tx.hex);
+      console.log("[BitVote] BTC broadcast complete! TxId:", btcTxId);
 
       // Step 5: Wait
       setStep("waiting");

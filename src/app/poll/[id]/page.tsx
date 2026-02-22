@@ -12,6 +12,7 @@ import {
 } from "@midl/executor-react";
 import { useReadContract } from "wagmi";
 import { encodeFunctionData } from "viem";
+import { RegtestBridgeProvider } from "@/config/regtestBridgeProvider";
 import { useToast } from "@/components/Toast";
 import { useParams } from "next/navigation";
 import { useState, useEffect } from "react";
@@ -122,6 +123,10 @@ export default function PollPage() {
         serializedTransactions: signedTxs,
         btcTransaction: btcData.tx.hex,
       });
+
+      // Broadcast BTC transaction to Bitcoin network
+      const provider = new RegtestBridgeProvider();
+      await provider.broadcastTransaction(null, btcData.tx.hex);
 
       setStep("waiting");
       waitForTransaction({ txId: btcData.tx.id });
