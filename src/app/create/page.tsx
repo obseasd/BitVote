@@ -29,7 +29,8 @@ export default function CreatePollPage() {
   const { addTxIntention, txIntentions } = useAddTxIntention();
   const { finalizeBTCTransaction, data: btcData } = useFinalizeBTCTransaction();
   const { signIntentionAsync } = useSignIntention();
-  const { sendBTCTransactionsAsync } = useSendBTCTransactions();
+  // Using direct fetch to RPC instead of hook for debugging
+  useSendBTCTransactions(); // keep hook mounted
   const { waitForTransaction } = useWaitForTransaction({
     mutation: {
       onSuccess: () => {
@@ -125,22 +126,37 @@ export default function CreatePollPage() {
         (tx) => tx?.substring(0, 20) + "..."
       ));
 
-      // Step 4: Broadcast
+      // Step 4: Broadcast BTC first, then EVM
       setStep("broadcasting");
       console.log("[BitVote] Broadcasting...");
       console.log("[BitVote] BTC tx hex length:", btcData.tx.hex.length);
       console.log("[BitVote] Signed EVM tx prefix:", signedTxs[0]?.substring(0, 6));
-      const hashes = await sendBTCTransactionsAsync({
-        serializedTransactions: signedTxs,
-        btcTransaction: btcData.tx.hex,
-      });
-      console.log("[BitVote] EVM broadcast complete! Hashes:", hashes);
 
-      // Broadcast BTC transaction to Bitcoin network
+      // Broadcast BTC transaction to Bitcoin network first
       console.log("[BitVote] Broadcasting BTC tx to Bitcoin network...");
       const provider = new RegtestBridgeProvider();
       const btcTxId = await provider.broadcastTransaction(null, btcData.tx.hex);
       console.log("[BitVote] BTC broadcast complete! TxId:", btcTxId);
+
+      // Send EVM txs via direct RPC call (bypass viem client)
+      console.log("[BitVote] Sending EVM txs to RPC...");
+      const rpcResponse = await fetch("https://rpc.staging.midl.xyz", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "eth_sendBTCTransactions",
+          params: [signedTxs, `0x${btcData.tx.hex}`],
+          id: 1,
+        }),
+      });
+      const rpcResult = await rpcResponse.json();
+      console.log("[BitVote] RPC response:", JSON.stringify(rpcResult));
+      if (rpcResult.error) {
+        throw new Error(`RPC error: ${rpcResult.error.message}`);
+      }
+      const hashes = rpcResult.result;
+      console.log("[BitVote] EVM hashes:", hashes);
 
       // Step 5: Wait
       setStep("waiting");
