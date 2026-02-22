@@ -3,19 +3,45 @@
 import Link from "next/link";
 import { useAccounts, useConnect, useDisconnect } from "@midl/react";
 import { AddressPurpose } from "@midl/core";
+import { useToast } from "@/components/Toast";
 import { useState } from "react";
 
 export function Header() {
   const { isConnected, accounts } = useAccounts();
   const ordinals = accounts?.find((a) => a.purpose === "ordinals");
-  const { connectors, connect } = useConnect({
-    purposes: [AddressPurpose.Ordinals],
+  const { toast } = useToast();
+  const [connecting, setConnecting] = useState(false);
+  const { connectors, connectAsync } = useConnect({
+    purposes: [AddressPurpose.Ordinals, AddressPurpose.Payment],
   });
   const { disconnect } = useDisconnect();
   const [showMenu, setShowMenu] = useState(false);
 
   const truncateAddress = (addr: string) =>
     `${addr.slice(0, 8)}...${addr.slice(-4)}`;
+
+  const handleConnect = async () => {
+    setConnecting(true);
+    try {
+      const connector = connectors.find((c) =>
+        c.id.toLowerCase().includes("xverse")
+      ) || connectors[0];
+
+      if (!connector) {
+        toast("No wallet found. Install Xverse wallet extension.", "error");
+        return;
+      }
+
+      await connectAsync({ id: connector.id });
+      toast("Wallet connected!", "success");
+    } catch (err: unknown) {
+      console.error("Connect error:", err);
+      const msg = err instanceof Error ? err.message : "Connection failed";
+      toast(msg, "error");
+    } finally {
+      setConnecting(false);
+    }
+  };
 
   return (
     <header className="border-b border-card-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
@@ -83,19 +109,11 @@ export function Header() {
             </div>
           ) : (
             <button
-              onClick={() => {
-                const xverse = connectors.find((c) =>
-                  c.id.toLowerCase().includes("xverse")
-                );
-                if (xverse) {
-                  connect({ id: xverse.id });
-                } else if (connectors.length > 0) {
-                  connect({ id: connectors[0].id });
-                }
-              }}
-              className="bg-accent hover:bg-accent-hover text-black font-semibold text-sm px-4 py-1.5 rounded-lg transition-colors"
+              onClick={handleConnect}
+              disabled={connecting}
+              className="bg-accent hover:bg-accent-hover disabled:opacity-60 text-black font-semibold text-sm px-4 py-1.5 rounded-lg transition-colors"
             >
-              Connect Wallet
+              {connecting ? "Connecting..." : "Connect Wallet"}
             </button>
           )}
         </nav>
