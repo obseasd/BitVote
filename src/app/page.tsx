@@ -6,15 +6,28 @@ import { BITVOTE_ABI, BITVOTE_ADDRESS } from "@/config/contract";
 import { useReadContract, useReadContracts } from "wagmi";
 import Link from "next/link";
 import { useAccounts } from "@midl/react";
+import { MOCK_POLLS } from "@/config/mockData";
+import { useState, useEffect } from "react";
 
 export default function Home() {
   const { isConnected } = useAccounts();
 
-  const { data: totalPolls } = useReadContract({
+  const { data: totalPolls, isError, isLoading } = useReadContract({
     abi: BITVOTE_ABI,
     address: BITVOTE_ADDRESS,
     functionName: "totalPolls",
   });
+
+  // Timeout fallback: if chain hasn't responded after 5s, switch to demo mode
+  const [timedOut, setTimedOut] = useState(false);
+  useEffect(() => {
+    if (totalPolls !== undefined || isError) return;
+    const timer = setTimeout(() => setTimedOut(true), 5000);
+    return () => clearTimeout(timer);
+  }, [totalPolls, isError]);
+
+  const isDemoMode = isError || (timedOut && totalPolls === undefined);
+  const showLoading = isLoading && !isDemoMode;
 
   const pollCount = Number(totalPolls || 0);
   const pollIds = Array.from({ length: pollCount }, (_, i) => pollCount - 1 - i);
@@ -33,6 +46,13 @@ export default function Home() {
       <Header />
 
       <main className="max-w-5xl mx-auto px-4 py-8">
+        {isDemoMode && (
+          <div className="bg-accent/10 border border-accent/20 rounded-lg px-4 py-3 text-sm text-accent mb-6 flex items-center gap-2">
+            <span className="text-base">&#9889;</span>
+            <span>Demo mode &mdash; showing sample polls. The Midl chain is currently syncing.</span>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold mb-1">
@@ -54,7 +74,26 @@ export default function Home() {
           )}
         </div>
 
-        {pollCount === 0 ? (
+        {showLoading ? (
+          <div className="text-center py-20">
+            <p className="text-muted animate-pulse">Loading polls...</p>
+          </div>
+        ) : isDemoMode ? (
+          <div className="grid gap-4 md:grid-cols-2">
+            {MOCK_POLLS.map((poll, i) => (
+              <PollCard
+                key={i}
+                pollId={i}
+                question={poll.question}
+                options={poll.options}
+                voteCounts={poll.voteCounts}
+                creator={poll.creator}
+                active={poll.active}
+                totalVotes={poll.totalVotes}
+              />
+            ))}
+          </div>
+        ) : pollCount === 0 ? (
           <div className="text-center py-20">
             <div className="text-6xl mb-4">&#9745;</div>
             <h2 className="text-xl font-semibold mb-2">No polls yet</h2>

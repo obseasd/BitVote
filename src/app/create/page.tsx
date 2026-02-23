@@ -9,6 +9,7 @@ import {
   useSignIntention,
   useSendBTCTransactions,
 } from "@midl/executor-react";
+import { useReadContract } from "wagmi";
 import { encodeFunctionData } from "viem";
 import { RegtestBridgeProvider } from "@/config/regtestBridgeProvider";
 import { useToast } from "@/components/Toast";
@@ -26,6 +27,22 @@ export default function CreatePollPage() {
   const [options, setOptions] = useState(["", ""]);
   const [step, setStep] = useState<TxStep>("idle");
   const [error, setError] = useState("");
+
+  // Check chain reachability for demo mode detection
+  const { data: chainCheck, isError: isChainError } = useReadContract({
+    abi: BITVOTE_ABI,
+    address: BITVOTE_ADDRESS,
+    functionName: "totalPolls",
+  });
+
+  const [timedOut, setTimedOut] = useState(false);
+  useEffect(() => {
+    if (chainCheck !== undefined || isChainError) return;
+    const timer = setTimeout(() => setTimedOut(true), 5000);
+    return () => clearTimeout(timer);
+  }, [chainCheck, isChainError]);
+
+  const isDemoMode = isChainError || (timedOut && chainCheck === undefined);
 
   const { addTxIntention, txIntentions } = useAddTxIntention();
   const { finalizeBTCTransaction, data: btcData } = useFinalizeBTCTransaction();
@@ -65,12 +82,32 @@ export default function CreatePollPage() {
     question.trim().length > 0 &&
     options.filter((o) => o.trim().length > 0).length >= 2;
 
+  // Demo create handler: simulates poll creation locally
+  const handleDemoCreate = () => {
+    if (!isValid) return;
+    setStep("adding");
+    setTimeout(() => {
+      setStep("broadcasting");
+      setTimeout(() => {
+        setStep("done");
+        toast("Poll created! (Demo mode)", "success");
+        setTimeout(() => router.push("/"), 2000);
+      }, 1000);
+    }, 800);
+  };
+
   const handleCreate = async () => {
     if (!isValid) return;
+
+    // Use demo handler in demo mode
+    if (isDemoMode) {
+      handleDemoCreate();
+      return;
+    }
+
     setError("");
 
     try {
-      // Step 1: Add intention
       setStep("adding");
       const filteredOptions = options.filter((o) => o.trim().length > 0);
 
@@ -90,7 +127,6 @@ export default function CreatePollPage() {
         },
       });
 
-      // Step 2: Finalize BTC transaction
       setStep("finalizing");
       await new Promise((r) => setTimeout(r, 500));
       console.log("[BitVote] Finalizing BTC transaction...");
@@ -114,7 +150,6 @@ export default function CreatePollPage() {
   const handleSign = async () => {
     if (!btcData) return;
     try {
-      // Step 3: Sign each intention via SDK hook (uses default account + BIP-322)
       setStep("signing");
       console.log("[BitVote] Signing intentions:", txIntentions.length);
       const signedTxs: `0x${string}`[] = [];
@@ -130,7 +165,6 @@ export default function CreatePollPage() {
         signedTxs.push(signed);
       }
 
-      // Step 4: Send signed txs + BTC tx to Midl RPC
       setStep("broadcasting");
       console.log("[BitVote] Sending via sendBTCTransactions...");
       const evmHashes = await sendBTCTransactionsAsync({
@@ -139,18 +173,15 @@ export default function CreatePollPage() {
       });
       console.log("[BitVote] EVM hashes:", evmHashes);
 
-      // Step 5: Also broadcast BTC tx separately to Bitcoin mempool
       console.log("[BitVote] Broadcasting BTC tx to mempool...");
       try {
         const provider = new RegtestBridgeProvider();
         const btcTxId = await provider.broadcastTransaction(null, btcData.tx.hex);
         console.log("[BitVote] BTC broadcast done:", btcTxId);
       } catch (e) {
-        // BTC broadcast may fail if RPC already broadcast it - that's OK
         console.warn("[BitVote] BTC broadcast warning:", e);
       }
 
-      // Step 6: Wait for confirmation
       setStep("waiting");
       waitForTransaction({ txId: btcData.tx.id });
     } catch (err: unknown) {
@@ -162,7 +193,7 @@ export default function CreatePollPage() {
     }
   };
 
-  if (!isConnected) {
+  if (!isConnected && !isDemoMode) {
     return (
       <div className="min-h-screen">
         <Header />
@@ -182,6 +213,13 @@ export default function CreatePollPage() {
 
       <main className="max-w-2xl mx-auto px-4 py-8">
         <h1 className="text-3xl font-bold mb-8">Create a Poll</h1>
+
+        {isDemoMode && (
+          <div className="bg-accent/10 border border-accent/20 rounded-lg px-4 py-3 text-sm text-accent mb-4 flex items-center gap-2">
+            <span className="text-base">&#9889;</span>
+            <span>Demo mode &mdash; poll creation is simulated. The Midl chain is currently syncing.</span>
+          </div>
+        )}
 
         <div className="bg-card border border-card-border rounded-xl p-6 space-y-6">
           {/* Question */}
@@ -256,7 +294,7 @@ export default function CreatePollPage() {
 
           {step === "done" && (
             <div className="bg-success/10 border border-success/20 rounded-lg px-4 py-3 text-sm text-success">
-              Poll created successfully! Redirecting...
+              {isDemoMode ? "Poll created! (Demo mode) Redirecting..." : "Poll created successfully! Redirecting..."}
             </div>
           )}
 

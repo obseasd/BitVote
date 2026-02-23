@@ -16,6 +16,7 @@ import { RegtestBridgeProvider } from "@/config/regtestBridgeProvider";
 import { useToast } from "@/components/Toast";
 import { useParams } from "next/navigation";
 import { useState, useEffect } from "react";
+import { MOCK_POLLS } from "@/config/mockData";
 
 type TxStep = "idle" | "adding" | "finalizing" | "signing" | "broadcasting" | "waiting" | "done" | "error";
 
@@ -31,7 +32,11 @@ export default function PollPage() {
   const [step, setStep] = useState<TxStep>("idle");
   const [error, setError] = useState("");
 
-  const { data: pollData, refetch } = useReadContract({
+  // Demo mode state for simulated voting
+  const [demoVoted, setDemoVoted] = useState(false);
+  const [demoVoteCounts, setDemoVoteCounts] = useState<bigint[] | null>(null);
+
+  const { data: pollData, isError: isPollError, refetch } = useReadContract({
     abi: BITVOTE_ABI,
     address: BITVOTE_ADDRESS,
     functionName: "getPoll",
@@ -44,6 +49,24 @@ export default function PollPage() {
     functionName: "hasVoted",
     args: evmAddress ? [BigInt(pollId), evmAddress as `0x${string}`] : undefined,
   });
+
+  // Timeout fallback for demo mode
+  const [timedOut, setTimedOut] = useState(false);
+  useEffect(() => {
+    if (pollData !== undefined || isPollError) return;
+    const timer = setTimeout(() => setTimedOut(true), 5000);
+    return () => clearTimeout(timer);
+  }, [pollData, isPollError]);
+
+  const isDemoMode = isPollError || (timedOut && pollData === undefined);
+  const mockPoll = pollId < MOCK_POLLS.length ? MOCK_POLLS[pollId] : null;
+
+  // Initialize demo vote counts from mock data
+  useEffect(() => {
+    if (isDemoMode && mockPoll && !demoVoteCounts) {
+      setDemoVoteCounts([...mockPoll.voteCounts]);
+    }
+  }, [isDemoMode, mockPoll, demoVoteCounts]);
 
   const { addTxIntention, txIntentions } = useAddTxIntention();
   const { finalizeBTCTransaction, data: btcData } = useFinalizeBTCTransaction();
@@ -69,16 +92,47 @@ export default function PollPage() {
     | [string, string[], bigint[], string, bigint, boolean, bigint]
     | undefined;
 
-  const question = poll?.[0] || "";
-  const options = poll?.[1] || [];
-  const voteCounts = poll?.[2] || [];
-  const creator = poll?.[3] || "";
-  const active = poll?.[5] ?? true;
-  const totalVotes = Number(poll?.[6] || 0);
-  const hasVoted = Boolean(userHasVoted);
+  // Use chain data or mock data
+  const question = isDemoMode ? (mockPoll?.question || "") : (poll?.[0] || "");
+  const options = isDemoMode ? (mockPoll?.options || []) : (poll?.[1] || []);
+  const voteCounts = isDemoMode ? (demoVoteCounts || mockPoll?.voteCounts || []) : (poll?.[2] || []);
+  const creator = isDemoMode ? (mockPoll?.creator || "") : (poll?.[3] || "");
+  const active = isDemoMode ? (mockPoll?.active ?? true) : (poll?.[5] ?? true);
+  const totalVotes = isDemoMode
+    ? Number(voteCounts.reduce((a, b) => a + b, 0n))
+    : Number(poll?.[6] || 0);
+  const hasVoted = isDemoMode ? demoVoted : Boolean(userHasVoted);
+
+  // Demo vote handler: simulates a vote locally
+  const handleDemoVote = () => {
+    if (selectedOption === null || demoVoted) return;
+    setStep("adding");
+    setTimeout(() => {
+      setStep("broadcasting");
+      setTimeout(() => {
+        // Update local vote counts
+        setDemoVoteCounts((prev) => {
+          if (!prev) return prev;
+          const updated = [...prev];
+          updated[selectedOption] = updated[selectedOption] + 1n;
+          return updated;
+        });
+        setDemoVoted(true);
+        setStep("done");
+        toast("Vote recorded! (Demo mode)", "success");
+      }, 1000);
+    }, 800);
+  };
 
   const handleVote = async () => {
     if (selectedOption === null || hasVoted || !active) return;
+
+    // Use demo handler in demo mode
+    if (isDemoMode) {
+      handleDemoVote();
+      return;
+    }
+
     setError("");
 
     try {
@@ -110,7 +164,6 @@ export default function PollPage() {
   const handleSign = async () => {
     if (!btcData) return;
     try {
-      // Sign each intention via SDK hook (uses default account + BIP-322)
       setStep("signing");
       console.log("[BitVote] Vote: Signing intentions:", txIntentions.length);
       const signedTxs: `0x${string}`[] = [];
@@ -125,7 +178,6 @@ export default function PollPage() {
         signedTxs.push(signed);
       }
 
-      // Send signed txs + BTC tx to Midl RPC
       setStep("broadcasting");
       console.log("[BitVote] Vote: Sending via sendBTCTransactions...");
       const evmHashes = await sendBTCTransactionsAsync({
@@ -134,7 +186,6 @@ export default function PollPage() {
       });
       console.log("[BitVote] Vote: EVM hashes:", evmHashes);
 
-      // Also broadcast BTC tx separately to Bitcoin mempool
       try {
         const provider = new RegtestBridgeProvider();
         await provider.broadcastTransaction(null, btcData.tx.hex);
@@ -143,7 +194,6 @@ export default function PollPage() {
         console.warn("[BitVote] Vote: BTC broadcast warning:", e);
       }
 
-      // Wait for confirmation
       setStep("waiting");
       waitForTransaction({ txId: btcData.tx.id });
     } catch (err: unknown) {
@@ -161,12 +211,26 @@ export default function PollPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [btcData]);
 
-  if (!poll) {
+  // Loading state
+  if (!isDemoMode && !poll) {
     return (
       <div className="min-h-screen">
         <Header />
         <main className="max-w-2xl mx-auto px-4 py-16 text-center">
-          <p className="text-muted">Loading poll...</p>
+          <p className="text-muted animate-pulse">Loading poll...</p>
+        </main>
+      </div>
+    );
+  }
+
+  // Mock poll not found
+  if (isDemoMode && !mockPoll) {
+    return (
+      <div className="min-h-screen">
+        <Header />
+        <main className="max-w-2xl mx-auto px-4 py-16 text-center">
+          <h1 className="text-2xl font-bold mb-4">Poll Not Found</h1>
+          <p className="text-muted">This poll does not exist in demo mode.</p>
         </main>
       </div>
     );
@@ -177,6 +241,13 @@ export default function PollPage() {
       <Header />
 
       <main className="max-w-2xl mx-auto px-4 py-8">
+        {isDemoMode && (
+          <div className="bg-accent/10 border border-accent/20 rounded-lg px-4 py-3 text-sm text-accent mb-4 flex items-center gap-2">
+            <span className="text-base">&#9889;</span>
+            <span>Demo mode &mdash; votes are simulated locally. The Midl chain is currently syncing.</span>
+          </div>
+        )}
+
         <div className="bg-card border border-card-border rounded-xl p-6 animate-fade-in">
           {/* Header */}
           <div className="flex items-start justify-between mb-6">
@@ -199,7 +270,7 @@ export default function PollPage() {
               const pct = totalVotes > 0 ? (count / totalVotes) * 100 : 0;
               const isSelected = selectedOption === i;
               const canSelect =
-                active && !hasVoted && isConnected && step === "idle";
+                active && !hasVoted && (isConnected || isDemoMode) && step === "idle";
 
               return (
                 <button
@@ -280,24 +351,30 @@ export default function PollPage() {
 
           {step === "done" && (
             <div className="bg-success/10 border border-success/20 rounded-lg px-4 py-3 text-sm text-success mb-4">
-              Vote recorded on Bitcoin!
+              {isDemoMode ? "Vote recorded! (Demo mode)" : "Vote recorded on Bitcoin!"}
             </div>
           )}
 
           {/* Actions */}
-          {!isConnected && (
+          {!isConnected && !isDemoMode && (
             <p className="text-sm text-muted text-center">
               Connect your Xverse wallet to vote
             </p>
           )}
 
-          {isConnected && hasVoted && step === "idle" && (
+          {!isDemoMode && isConnected && hasVoted && step === "idle" && (
             <div className="text-center text-sm text-success py-2">
               You already voted on this poll
             </div>
           )}
 
-          {isConnected && !hasVoted && active && (step === "idle" || step === "error") && (
+          {isDemoMode && demoVoted && step === "idle" && (
+            <div className="text-center text-sm text-success py-2">
+              You already voted on this poll (demo)
+            </div>
+          )}
+
+          {(isConnected || isDemoMode) && !hasVoted && active && (step === "idle" || step === "error") && (
             <button
               onClick={handleVote}
               disabled={selectedOption === null}
